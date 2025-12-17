@@ -3,32 +3,51 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Trafik Takip Sistemi</title>
+    <title>Bursa Trafik Işığı Takip</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         body { margin: 0; padding: 0; font-family: sans-serif; }
         #map { height: 100vh; width: 100vw; }
-        .controls {
+        .menu {
             position: absolute; top: 10px; right: 10px; z-index: 1000;
             background: white; padding: 10px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+            display: flex; flex-direction: column; gap: 5px;
         }
+        button { cursor: pointer; padding: 5px; }
     </style>
 </head>
 <body>
 
-<div class="controls">
-    <button onclick="localStorage.clear(); location.reload();">Tüm Işıkları Sil</button>
+<div class="menu">
+    <b>Bursa Trafik Takip</b>
+    <button onclick="exportLights()">Verileri Kopyala (Telefona At)</button>
+    <button onclick="importLights()">Veri Yapıştır (Telefondan Yükle)</button>
+    <button onclick="if(confirm('Hepsi silinsin mi?')) { localStorage.clear(); location.reload(); }">Hepsini Sil</button>
 </div>
+
 <div id="map"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-    var map = L.map('map').setView([41.0082, 28.9784], 13);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+    // Bursa Koordinatları ve Sınırları
+    var bursaMerkez = [40.1885, 29.0610];
+    var bursaSinir = [
+        [40.00, 28.50], // Güney Batı
+        [40.40, 29.60]  // Kuzey Doğu
+    ];
 
-    var savedLights = JSON.parse(localStorage.getItem('myLights')) || [];
+    var map = L.map('map', {
+        maxBounds: bursaSinir, // Haritayı Bursa ile sınırla
+        maxBoundsViscosity: 1.0
+    }).setView(bursaMerkez, 14);
 
-    // Başlangıçta kayıtlı ışıkları yükle
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© Bursa Trafik Takip'
+    }).addTo(map);
+
+    var savedLights = JSON.parse(localStorage.getItem('bursaLights')) || [];
+
+    // Kayıtlı ışıkları yükle
     savedLights.forEach(l => createLight(l.lat, l.lng, l.red, l.green, false));
 
     map.on('click', function(e) {
@@ -45,7 +64,7 @@
 
         if (isNew) {
             savedLights.push({lat, lng, red: redT, green: greenT});
-            localStorage.setItem('myLights', JSON.stringify(savedLights));
+            localStorage.setItem('bursaLights', JSON.stringify(savedLights));
         }
 
         setInterval(() => {
@@ -62,12 +81,30 @@
 
         marker.bindTooltip(data.status + ": " + data.time + "s", {permanent: true});
         
-        // Işığa tıklandığında süreyi sıfırlama (Senkronizasyon)
         marker.on('click', function() {
             data.status = 'KIRMIZI';
             data.time = redT;
             marker.setStyle({color: 'red'});
         });
+    }
+
+    // VERİ AKTARMA FONKSİYONLARI
+    function exportLights() {
+        const data = localStorage.getItem('bursaLights');
+        if(data) {
+            navigator.clipboard.writeText(data);
+            alert("Işık verileri panoya kopyalandı! Bu metni kendinize WhatsApp'tan atın ve telefonda 'Veri Yapıştır' diyerek yükleyin.");
+        } else {
+            alert("Henüz kayıtlı ışık yok.");
+        }
+    }
+
+    function importLights() {
+        const data = prompt("WhatsApp'tan kopyaladığınız kodu buraya yapıştırın:");
+        if(data) {
+            localStorage.setItem('bursaLights', data);
+            location.reload();
+        }
     }
 </script>
 </body>
