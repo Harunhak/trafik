@@ -52,20 +52,19 @@
         }
     });
 
-    map.on('click', function(e) {
-        var red = prompt("Kırmızı ışık süresi (sn):", "30");
-        var green = prompt("Yeşil ışık süresi (sn):", "20");
-        if (red && green) {
-            const newLightRef = db.ref('lights').push();
-            newLightRef.set({
-                lat: e.latlng.lat,
-                lng: e.latlng.lng,
-                red: parseInt(red),
-                green: parseInt(green),
-                startTime: Date.now() // Senkronizasyon için zaman damgası
-            });
+    marker.on('click', function() {
+    const action = confirm("Bu ışık için ne yapmak istersiniz?\n\nTAMAM: Işığı Kırmızıya Sıfırla (Senkronize Et)\nİPTAL: Işığı Tamamen Sil");
+    
+    if (action) {
+        // Tamam'a basılırsa: Sadece zamanı sıfırla
+        db.ref('lights/' + id).update({ startTime: Date.now() });
+    } else {
+        // İptal'e basılırsa: Silmek isteyip istemediğini bir daha sor
+        if(confirm("Emin misiniz? Bu ışık tüm cihazlardan silinecek.")) {
+            db.ref('lights/' + id).remove(); // Firebase'den siler
         }
-    });
+    }
+});
 
     function renderLight(id, light) {
         var marker = L.circleMarker([light.lat, light.lng], { radius: 15, color: 'red', fillOpacity: 0.8 }).addTo(map);
@@ -99,3 +98,4 @@
 </script>
 </body>
 </html>
+
