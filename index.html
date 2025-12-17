@@ -67,35 +67,55 @@
 });
 
     function renderLight(id, light) {
-        var marker = L.circleMarker([light.lat, light.lng], { radius: 15, color: 'red', fillOpacity: 0.8 }).addTo(map);
-        
-        setInterval(() => {
-            const now = Date.now();
-            const elapsed = Math.floor((now - light.startTime) / 1000);
-            const totalCycle = light.red + light.green;
-            const cyclePos = elapsed % totalCycle;
+    var marker = L.circleMarker([light.lat, light.lng], { radius: 15, color: 'red', fillOpacity: 0.8 }).addTo(map);
+    
+    // Sayaç döngüsü
+    setInterval(() => {
+        const now = Date.now();
+        const elapsed = Math.floor((now - light.startTime) / 1000);
+        const totalCycle = light.red + light.green;
+        const cyclePos = elapsed % totalCycle;
 
-            let currentStatus, remaining;
-            if (cyclePos < light.red) {
-                currentStatus = 'KIRMIZI';
-                remaining = light.red - cyclePos;
-                marker.setStyle({color: 'red'});
-            } else {
-                currentStatus = 'YEŞİL';
-                remaining = totalCycle - cyclePos;
-                marker.setStyle({color: 'green'});
-            }
-            marker.setTooltipContent(`${currentStatus}: ${remaining}s`);
-        }, 1000);
+        let currentStatus, remaining;
+        if (cyclePos < light.red) {
+            currentStatus = 'KIRMIZI';
+            remaining = light.red - cyclePos;
+            marker.setStyle({color: 'red'});
+        } else {
+            currentStatus = 'YEŞİL';
+            remaining = totalCycle - cyclePos;
+            marker.setStyle({color: 'green'});
+        }
+        marker.setTooltipContent(`${currentStatus}: ${remaining}s`);
+    }, 1000);
 
-        marker.bindTooltip("Yükleniyor...", {permanent: true});
+    marker.bindTooltip("Yükleniyor...", {permanent: true});
 
-        // Işığa tıklandığında süreyi sıfırla (Bulutu güncelle)
-        marker.on('click', function() {
-            db.ref('lights/' + id).update({ startTime: Date.now() });
-        });
+    // --- BURAYI GÜNCELLEDİK: BUTONLU POPUP SİSTEMİ ---
+    const popupContent = `
+        <div style="text-align:center;">
+            <b>Işık Kontrolü</b><br><br>
+            <button onclick="resetLight('${id}')" style="background:orange; color:white; border:none; padding:5px; margin-bottom:5px; width:100%; cursor:pointer;">Kırmızıya Sıfırla</button><br>
+            <button onclick="deleteLight('${id}')" style="background:red; color:white; border:none; padding:5px; width:100%; cursor:pointer;">Işığı Sil</button>
+        </div>
+    `;
+    marker.bindPopup(popupContent);
+}
+
+// Global fonksiyonlar (Butonların çalışması için gerekli)
+window.resetLight = function(id) {
+    db.ref('lights/' + id).update({ startTime: Date.now() });
+    alert("Işık sıfırlandı!");
+};
+
+window.deleteLight = function(id) {
+    if(confirm("Bu ışığı tamamen silmek istediğinize emin misiniz?")) {
+        db.ref('lights/' + id).remove();
+    }
+};
     }
 </script>
 </body>
 </html>
+
 
