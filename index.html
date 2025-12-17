@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trafik Takip Sistemi</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; padding: 0; font-family: sans-serif; }
+        #map { height: 100vh; width: 100vw; }
+        .controls {
+            position: absolute; top: 10px; right: 10px; z-index: 1000;
+            background: white; padding: 10px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+        }
+    </style>
+</head>
+<body>
+
+<div class="controls">
+    <button onclick="localStorage.clear(); location.reload();">Tüm Işıkları Sil</button>
+</div>
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    var map = L.map('map').setView([41.0082, 28.9784], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+    var savedLights = JSON.parse(localStorage.getItem('myLights')) || [];
+
+    // Başlangıçta kayıtlı ışıkları yükle
+    savedLights.forEach(l => createLight(l.lat, l.lng, l.red, l.green, false));
+
+    map.on('click', function(e) {
+        var red = prompt("Kırmızı ışık süresi (sn):", "30");
+        var green = prompt("Yeşil ışık süresi (sn):", "20");
+        if (red && green) {
+            createLight(e.latlng.lat, e.latlng.lng, parseInt(red), parseInt(green), true);
+        }
+    });
+
+    function createLight(lat, lng, redT, greenT, isNew) {
+        var marker = L.circleMarker([lat, lng], { radius: 15, color: 'red', fillOpacity: 0.8 }).addTo(map);
+        var data = { status: 'KIRMIZI', time: redT };
+
+        if (isNew) {
+            savedLights.push({lat, lng, red: redT, green: greenT});
+            localStorage.setItem('myLights', JSON.stringify(savedLights));
+        }
+
+        setInterval(() => {
+            data.time--;
+            if (data.time <= 0) {
+                if (data.status === 'KIRMIZI') {
+                    data.status = 'YEŞİL'; data.time = greenT; marker.setStyle({color: 'green'});
+                } else {
+                    data.status = 'KIRMIZI'; data.time = redT; marker.setStyle({color: 'red'});
+                }
+            }
+            marker.setTooltipContent(data.status + ": " + data.time + "s");
+        }, 1000);
+
+        marker.bindTooltip(data.status + ": " + data.time + "s", {permanent: true});
+        
+        // Işığa tıklandığında süreyi sıfırlama (Senkronizasyon)
+        marker.on('click', function() {
+            data.status = 'KIRMIZI';
+            data.time = redT;
+            marker.setStyle({color: 'red'});
+        });
+    }
+</script>
+</body>
+</html>
