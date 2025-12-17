@@ -3,24 +3,32 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bursa Canlı Trafik</title>
+    <title>Bursa Canlı Trafik Takip</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
     <style>
-        body { margin: 0; padding: 0; }
+        body { margin: 0; padding: 0; font-family: sans-serif; }
         #map { height: 100vh; width: 100vw; }
-        .status { position: absolute; top: 10px; left: 50px; z-index: 1000; background: white; padding: 5px; border-radius: 5px; }
+        .status-box {
+            position: absolute; top: 10px; left: 50px; z-index: 1000;
+            background: white; padding: 8px 15px; border-radius: 20px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2); font-weight: bold; font-size: 13px;
+        }
+        .popup-btn {
+            width: 100%; border: none; color: white; padding: 8px;
+            margin-top: 5px; cursor: pointer; border-radius: 4px; font-weight: bold;
+        }
     </style>
 </head>
 <body>
 
-<div class="status" id="db-status">Buluta Bağlanılıyor...</div>
+<div class="status-box" id="db-status">Buluta Bağlanılıyor...</div>
 <div id="map"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-    // --- KENDİ BİLGİLERİNİ BURAYA YAPIŞTIR ---
+    // --- BURAYI KENDİ BİLGİLERİNLE DOLDUR (Firebase -> Proje Ayarları) ---
     const firebaseConfig = {
         apiKey: "AIzaSyAgfkGI82dqs8fa_sqQjWl1ZcIf9AJDEes",
         authDomain: "trafik-2291d.firebaseapp.com",
@@ -31,91 +39,118 @@
         appId: "1:119089745586:web:ef1e7280435a4aa918c3ab",
         measurementId: "G-6TF54HZHVS"
     };
-    // ------------------------------------------
+    // ------------------------------------------------------------------
 
+    // Firebase'i Başlat
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
     const statusDiv = document.getElementById('db-status');
 
-    var map = L.map('map').setView([40.1885, 29.0610], 14);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+    // Bursa Odaklı Harita
+    var map = L.map('map', {
+        maxBounds: [[39.90, 28.40], [40.50, 29.80]], // Bursa dışına kaymayı engelle
+        maxBoundsViscosity: 1.0
+    }).setView([40.1885, 29.0610], 14);
 
-    // Veritabanından ışıkları oku
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© Bursa Trafik Takip'
+    }).addTo(map);
+
+    // Buluttan Verileri Çek ve Gerçek Zamanlı Dinle
     db.ref('lights').on('value', (snapshot) => {
-        statusDiv.innerText = "Bulut Bağlantısı Aktif";
-        // Haritayı temizle ve yeniden çiz (basit yöntem)
-        map.eachLayer((layer) => { if (!!layer.toGeoJSON && !layer._url) map.removeLayer(layer); });
+        statusDiv.innerText = "🟢 Bulut Bağlantısı Aktif";
+        statusDiv.style.color = "green";
+        
+        // Mevcut markerları temizle (Yeniden çizim için)
+        map.eachLayer((layer) => {
+            if (layer instanceof L.CircleMarker) map.removeLayer(layer);
+        });
         
         const data = snapshot.val();
-        for (let id in data) {
-            renderLight(id, data[id]);
+        if (data) {
+            for (let id in data) {
+                renderLight(id, data[id]);
+            }
+        }
+    }, (error) => {
+        statusDiv.innerText = "🔴 Bağlantı Hatası: " + error.message;
+        statusDiv.style.color = "red";
+    });
+
+    // Haritaya Tıklayınca Yeni Işık Ekle
+    map.on('click', function(e) {
+        var red = prompt("Kırmızı ışık süresi (saniye):", "30");
+        var green = prompt("Yeşil ışık süresi (saniye):", "20");
+        
+        if (red && green) {
+            const newLightRef = db.ref('lights').push();
+            newLightRef.set({
+                lat: e.latlng.lat,
+                lng: e.latlng.lng,
+                red: parseInt(red),
+                green: parseInt(green),
+                startTime: Date.now()
+            });
         }
     });
 
-    marker.on('click', function() {
-    const action = confirm("Bu ışık için ne yapmak istersiniz?\n\nTAMAM: Işığı Kırmızıya Sıfırla (Senkronize Et)\nİPTAL: Işığı Tamamen Sil");
-    
-    if (action) {
-        // Tamam'a basılırsa: Sadece zamanı sıfırla
-        db.ref('lights/' + id).update({ startTime: Date.now() });
-    } else {
-        // İptal'e basılırsa: Silmek isteyip istemediğini bir daha sor
-        if(confirm("Emin misiniz? Bu ışık tüm cihazlardan silinecek.")) {
-            db.ref('lights/' + id).remove(); // Firebase'den siler
-        }
-    }
-});
-
+    // Işığı Haritada Çiz ve Çalıştır
     function renderLight(id, light) {
-    var marker = L.circleMarker([light.lat, light.lng], { radius: 15, color: 'red', fillOpacity: 0.8 }).addTo(map);
-    
-    // Sayaç döngüsü
-    setInterval(() => {
-        const now = Date.now();
-        const elapsed = Math.floor((now - light.startTime) / 1000);
-        const totalCycle = light.red + light.green;
-        const cyclePos = elapsed % totalCycle;
+        var marker = L.circleMarker([light.lat, light.lng], {
+            radius: 12, color: 'red', fillOpacity: 0.9, weight: 3
+        }).addTo(map);
 
-        let currentStatus, remaining;
-        if (cyclePos < light.red) {
-            currentStatus = 'KIRMIZI';
-            remaining = light.red - cyclePos;
-            marker.setStyle({color: 'red'});
-        } else {
-            currentStatus = 'YEŞİL';
-            remaining = totalCycle - cyclePos;
-            marker.setStyle({color: 'green'});
+        // Her saniye ışık rengini hesapla
+        const timerInterval = setInterval(() => {
+            const now = Date.now();
+            const elapsed = Math.floor((now - light.startTime) / 1000);
+            const totalCycle = light.red + light.green;
+            const cyclePos = elapsed % totalCycle;
+
+            let statusText, remaining;
+            if (cyclePos < light.red) {
+                statusText = "KIRMIZI";
+                remaining = light.red - cyclePos;
+                marker.setStyle({color: 'red', fillColor: 'red'});
+            } else {
+                statusText = "YEŞİL";
+                remaining = totalCycle - cyclePos;
+                marker.setStyle({color: 'green', fillColor: 'green'});
+            }
+            
+            if (marker.getTooltip()) {
+                marker.setTooltipContent(`${statusText}: ${remaining}s`);
+            }
+        }, 1000);
+
+        marker.bindTooltip("Hesaplanıyor...", {permanent: true, direction: 'top', offset: [0, -10]});
+
+        // Işığa Tıklayınca Kontrol Paneli (Sıfırla/Sil)
+        const popupHtml = `
+            <div style="min-width:120px;">
+                <b style="display:block;margin-bottom:8px;text-align:center;">Işık Yönetimi</b>
+                <button onclick="resetLight('${id}')" class="popup-btn" style="background:#f39c12;">🔴 Sıfırla (Kırmızı)</button>
+                <button onclick="deleteLight('${id}')" class="popup-btn" style="background:#e74c3c;">🗑️ Işığı Sil</button>
+            </div>
+        `;
+        marker.bindPopup(popupHtml);
+
+        // Marker silindiğinde sayacı durdur (bellek yönetimi)
+        marker.on('remove', () => clearInterval(timerInterval));
+    }
+
+    // --- Global Fonksiyonlar ---
+    window.resetLight = function(id) {
+        db.ref('lights/' + id).update({ startTime: Date.now() });
+        map.closePopup();
+    };
+
+    window.deleteLight = function(id) {
+        if(confirm("Bu ışığı silmek istediğinize emin misiniz?")) {
+            db.ref('lights/' + id).remove();
         }
-        marker.setTooltipContent(`${currentStatus}: ${remaining}s`);
-    }, 1000);
+    };
 
-    marker.bindTooltip("Yükleniyor...", {permanent: true});
-
-    // --- BURAYI GÜNCELLEDİK: BUTONLU POPUP SİSTEMİ ---
-    const popupContent = `
-        <div style="text-align:center;">
-            <b>Işık Kontrolü</b><br><br>
-            <button onclick="resetLight('${id}')" style="background:orange; color:white; border:none; padding:5px; margin-bottom:5px; width:100%; cursor:pointer;">Kırmızıya Sıfırla</button><br>
-            <button onclick="deleteLight('${id}')" style="background:red; color:white; border:none; padding:5px; width:100%; cursor:pointer;">Işığı Sil</button>
-        </div>
-    `;
-    marker.bindPopup(popupContent);
-}
-
-// Global fonksiyonlar (Butonların çalışması için gerekli)
-window.resetLight = function(id) {
-    db.ref('lights/' + id).update({ startTime: Date.now() });
-    alert("Işık sıfırlandı!");
-};
-
-window.deleteLight = function(id) {
-    if(confirm("Bu ışığı tamamen silmek istediğinize emin misiniz?")) {
-        db.ref('lights/' + id).remove();
-    }
-};
-    }
 </script>
 </body>
 </html>
-
-
