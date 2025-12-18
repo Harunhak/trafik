@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bursa Yeşil Dalga - Admin</title>
+    <title>Bursa Yeşil Dalga - Anlık Takip</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
@@ -17,11 +17,11 @@
         }
         #assistant-panel {
             position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
-            z-index: 1000; background: rgba(0, 0, 0, 0.85); color: white;
+            z-index: 1000; background: rgba(0, 0, 0, 0.9); color: white;
             padding: 15px 25px; border-radius: 15px; text-align: center;
-            width: 80%; max-width: 400px; display: none;
+            width: 85%; max-width: 400px; display: none; border: 2px solid #3498db;
         }
-        .speed-val { font-size: 24px; color: #2ecc71; font-weight: bold; }
+        .speed-val { font-size: 32px; color: #2ecc71; font-weight: bold; display: block; }
         .popup-btn { width: 100%; border: none; color: white; padding: 8px; margin-top: 5px; cursor: pointer; border-radius: 4px; font-weight: bold; }
         .admin-badge { background: #e74c3c; color: white; padding: 2px 8px; border-radius: 10px; margin-left: 10px; font-size: 10px; }
     </style>
@@ -30,19 +30,19 @@
 
 <div class="status-box" id="db-status">Buluta Bağlanılıyor...</div>
 <div id="assistant-panel">
-    <div id="light-info">Işığa mesafe hesaplanıyor...</div>
-    <div id="speed-suggestion">Önerilen Hız: <span class="speed-val">--</span> km/s</div>
+    <div id="light-info" style="font-size: 14px; margin-bottom: 5px;">Hesaplanıyor...</div>
+    <div id="speed-suggestion">Önerilen Hız:<br><span class="speed-val">--</span> <small>km/s</small></div>
 </div>
 <div id="map"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-    // --- GÜVENLİK AYARI ---
+    // --- GÜVENLİK ---
     const ADMIN_PASSWORD = "bursa16"; 
     const urlParams = new URLSearchParams(window.location.search);
     const isAdmin = urlParams.get('admin') === ADMIN_PASSWORD;
 
-    // --- BURAYI KENDİ BİLGİLERİNLE DOLDUR ---
+    // --- FIREBASE CONFIG (Kendi bilgilerini buraya yapıştır) ---
     const firebaseConfig = {
         apiKey: "AIzaSyAgfkGI82dqs8fa_sqQjWl1ZcIf9AJDEes",
         authDomain: "trafik-2291d.firebaseapp.com",
@@ -53,89 +53,48 @@
         appId: "1:119089745586:web:ef1e7280435a4aa918c3ab",
         measurementId: "G-6TF54HZHVS"
     };
-    // ------------------------------------------
-
+    
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
     const statusDiv = document.getElementById('db-status');
     const assistantPanel = document.getElementById('assistant-panel');
 
+    // Harita Başlangıcı
     var map = L.map('map').setView([40.1885, 29.0610], 14);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
-    let userMarker = L.circleMarker([0,0], {radius: 8, color: '#3498db', fillColor: '#3498db', fillOpacity: 1}).addTo(map);
+    // KULLANICI İÇİN MAVİ NOKTA (ANLIK TAKİP)
+    let userMarker = L.circleMarker([0,0], {
+        radius: 10, color: 'white', weight: 3, fillColor: '#3498db', fillOpacity: 1
+    }).addTo(map);
+
     let allLights = {};
 
-    if (isAdmin) {
-        statusDiv.innerHTML = '🟢 Admin Modu <span class="admin-badge">YÖNETİCİ</span>';
-    } else {
-        statusDiv.innerHTML = '🟢 İzleyici Modu';
-    }
-
-    // Verileri Çek ve Haritaya Ekle
     db.ref('lights').on('value', (snapshot) => {
-        statusDiv.style.color = "green";
-        // Markerları temizle
+        statusDiv.innerHTML = isAdmin ? '🟢 Admin Modu <span class="admin-badge">YÖNETİCİ</span>' : '🟢 İzleyici Modu';
         map.eachLayer((layer) => { if (layer instanceof L.CircleMarker && layer !== userMarker) map.removeLayer(layer); });
-        
         allLights = snapshot.val() || {};
-        for (let id in allLights) {
-            renderLight(id, allLights[id]);
-        }
+        for (let id in allLights) { renderLight(id, allLights[id]); }
     });
 
-    // Sadece Admin Işık Ekleyebilir
-    map.on('click', function(e) {
-        if (!isAdmin) return;
-        var red = prompt("Kırmızı ışık süresi (sn):", "30");
-        var green = prompt("Yeşil ışık süresi (sn):", "20");
-        if (red && green) {
-            db.ref('lights').push({
-                lat: e.latlng.lat, lng: e.latlng.lng,
-                red: parseInt(red), green: parseInt(green),
-                startTime: Date.now()
-            });
-        }
+    // --- ANLIK TAKİP MOTORU ---
+    map.locate({
+        watch: true,           // Sürekli izle
+        enableHighAccuracy: true, // GPS uydularını kullan (Yüksek hassasiyet)
+        setView: false         // Harita sürekli zıplamasın, biz manuel kaydırırız
     });
 
-    function renderLight(id, light) {
-        var marker = L.circleMarker([light.lat, light.lng], {radius: 12, color: 'red', fillOpacity: 0.9}).addTo(map);
-        
-        const timerInterval = setInterval(() => {
-            const now = Date.now();
-            const elapsed = Math.floor((now - light.startTime) / 1000);
-            const totalCycle = light.red + light.green;
-            const cyclePos = elapsed % totalCycle;
-
-            if (cyclePos < light.red) {
-                marker.setStyle({color: 'red', fillColor: 'red'});
-                marker.setTooltipContent(`KIRMIZI: ${light.red - cyclePos}s`);
-            } else {
-                marker.setStyle({color: 'green', fillColor: 'green'});
-                marker.setTooltipContent(`YEŞİL: ${totalCycle - cyclePos}s`);
-            }
-        }, 1000);
-
-        marker.bindTooltip("...", {permanent: true, direction: 'top', offset: [0, -10]});
-
-        if (isAdmin) {
-            const popupHtml = `
-                <div style="min-width:120px; text-align:center;">
-                    <b>Işık Yönetimi</b><br>
-                    <button onclick="resetLight('${id}')" class="popup-btn" style="background:#f39c12;">Sıfırla</button>
-                    <button onclick="deleteLight('${id}')" class="popup-btn" style="background:#e74c3c;">Sil</button>
-                </div>`;
-            marker.bindPopup(popupHtml);
-        }
-        
-        marker.on('remove', () => clearInterval(timerInterval));
-    }
-
-    // Konum ve Yeşil Dalga Hesaplama
-    map.locate({watch: true, enableHighAccuracy: true});
     map.on('locationfound', function(e) {
-        userMarker.setLatLng(e.latlng);
-        findNearestLight(e.latlng);
+        userMarker.setLatLng(e.latlng); // Mavi noktayı taşı
+        findNearestLight(e.latlng);     // Konum değiştikçe en yakın ışığı bul
+        
+        // Eğer haritadan uzaklaşırsan seni merkeze alır (opsiyonel)
+        // map.panTo(e.latlng); 
+    });
+
+    map.on('locationerror', function(e) {
+        statusDiv.innerHTML = "⚠️ GPS Erişimi Yok!";
+        statusDiv.style.color = "red";
     });
 
     function findNearestLight(userPos) {
@@ -144,7 +103,7 @@
         for (let id in allLights) {
             let light = allLights[id];
             let dist = userPos.distanceTo([light.lat, light.lng]);
-            if (dist < minDistance && dist < 1000) {
+            if (dist < minDistance && dist < 1200) { // 1.2 km içindeki en yakın ışık
                 minDistance = dist;
                 nearest = { id, ...light, dist };
             }
@@ -162,24 +121,66 @@
         const elapsed = Math.floor((now - light.startTime) / 1000);
         const totalCycle = light.red + light.green;
         const cyclePos = elapsed % totalCycle;
-        let timeToGreen = (cyclePos < light.red) ? (light.red - cyclePos) : ((totalCycle - cyclePos) + light.red);
-        let suggestedSpeed = (light.dist / timeToGreen) * 3.6;
+
+        // Yeşil yanana kadar geçmesi gereken süre
+        let timeToGreen;
+        if (cyclePos < light.red) {
+            timeToGreen = light.red - cyclePos;
+        } else {
+            // Zaten yeşil yanıyor, bir sonraki yeşili mi hesaplayalım? 
+            // Şimdilik kırmızı bitimine odaklı:
+            timeToGreen = (totalCycle - cyclePos) + light.red;
+        }
+
+        let suggestedSpeed = (light.dist / timeToGreen) * 3.6; // km/s
         
-        document.getElementById('light-info').innerText = `Işığa: ${Math.round(light.dist)}m | Kırmızı: ${timeToGreen}s`;
+        document.getElementById('light-info').innerText = `En Yakın Işık: ${Math.round(light.dist)}m`;
         const speedEl = document.querySelector('.speed-val');
-        if (suggestedSpeed > 10 && suggestedSpeed < 80) {
+        
+        if (suggestedSpeed > 15 && suggestedSpeed < 85) {
             speedEl.innerText = Math.round(suggestedSpeed);
             speedEl.style.color = "#2ecc71";
-            document.getElementById('speed-suggestion').style.display = "block";
+        } else if (suggestedSpeed >= 85) {
+            speedEl.innerText = "!!";
+            speedEl.style.color = "#e74c3c";
+            document.getElementById('light-info').innerText = "Yetişemezsin, çok hızlı!";
         } else {
             speedEl.innerText = "--";
-            document.getElementById('speed-suggestion').innerText = suggestedSpeed > 80 ? "Yetişemezsin!" : "Çok Yavaşla!";
+            speedEl.style.color = "#f1c40f";
         }
     }
 
+    // (Işık Ekleme ve Render Fonksiyonları...)
+    function renderLight(id, light) {
+        var marker = L.circleMarker([light.lat, light.lng], {radius: 12, color: 'red', fillOpacity: 0.9}).addTo(map);
+        setInterval(() => {
+            const now = Date.now();
+            const elapsed = Math.floor((now - light.startTime) / 1000);
+            const totalCycle = light.red + light.green;
+            const cyclePos = elapsed % totalCycle;
+            if (cyclePos < light.red) {
+                marker.setStyle({color: 'red', fillColor: 'red'});
+                marker.setTooltipContent(`KIRMIZI: ${light.red - cyclePos}s`);
+            } else {
+                marker.setStyle({color: 'green', fillColor: 'green'});
+                marker.setTooltipContent(`YEŞİL: ${totalCycle - cyclePos}s`);
+            }
+        }, 1000);
+        marker.bindTooltip("...", {permanent: true, direction: 'top', offset: [0, -10]});
+        if (isAdmin) {
+            marker.bindPopup(`<button onclick="resetLight('${id}')" class="popup-btn" style="background:#f39c12;">Sıfırla</button><br><button onclick="deleteLight('${id}')" class="popup-btn" style="background:#e74c3c;">Sil</button>`);
+        }
+    }
+
+    map.on('click', function(e) {
+        if (!isAdmin) return;
+        var red = prompt("Kırmızı (sn):", "30");
+        var green = prompt("Yeşil (sn):", "20");
+        if (red && green) db.ref('lights').push({lat: e.latlng.lat, lng: e.latlng.lng, red: parseInt(red), green: parseInt(green), startTime: Date.now()});
+    });
+
     window.resetLight = (id) => { db.ref('lights/' + id).update({ startTime: Date.now() }); map.closePopup(); };
     window.deleteLight = (id) => { if(confirm("Silinsin mi?")) db.ref('lights/' + id).remove(); };
-
 </script>
 </body>
 </html>
