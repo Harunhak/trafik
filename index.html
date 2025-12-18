@@ -85,9 +85,16 @@
     });
 
     map.on('locationfound', function(e) {
-        userMarker.setLatLng(e.latlng); // Mavi noktayı taşı
-        findNearestLight(e.latlng);     // Konum değiştikçe en yakın ışığı bul
-        map.panTo(e.latlng); 
+        userMarker.setLatLng(e.latlng); // Mavi noktayı her zaman günceller
+        findNearestLight(e.latlng);     // Hız hesaplaması arka planda çalışır
+        
+        // Sadece admin DEĞİLSEN harita akıcı şekilde seni takip eder
+        if (!isAdmin) {
+            map.flyTo(e.latlng, map.getZoom(), {
+                animate: true,
+                duration: 1.5  // Kayma hızını buradan ayarlayabilirsin (saniye)
+            });
+        }
     });
 
     map.on('locationerror', function(e) {
@@ -182,4 +189,5 @@
 </script>
 </body>
 </html>
+
 
