@@ -3,24 +3,29 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bursa Yeşil Dalga - Asistan</title>
+    <title>Bursa Yeşil Dalga - Navigasyon</title>
+    
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
+    
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
+    
     <style>
         body { margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; }
         #map { height: 100vh; width: 100vw; }
+        
         .status-box {
             position: absolute; top: 10px; left: 10px; z-index: 1000;
             background: white; padding: 10px 15px; border-radius: 12px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.2); font-weight: bold; font-size: 13px;
             display: flex; align-items: center;
         }
-        /* SES KAPATMA BUTONU STİLİ */
+
         .mute-btn {
             cursor: pointer; margin-left: 12px; padding: 5px 10px;
             border-radius: 8px; border: 1px solid #ddd; background: #fdfdfd;
-            font-size: 12px; font-weight: bold; transition: 0.3s;
+            font-size: 11px; font-weight: bold;
         }
         .mute-btn.active { background: #ff7675; color: white; border-color: #d63031; }
         
@@ -30,33 +35,36 @@
             padding: 20px; border-radius: 20px; text-align: center;
             width: 85%; max-width: 350px; display: none; border: 2px solid #3498db;
         }
-        .speed-val { font-size: 40px; color: #2ecc71; font-weight: bold; display: block; line-height: 1; }
-        .admin-badge { background: #e74c3c; color: white; padding: 2px 8px; border-radius: 10px; margin-left: 10px; font-size: 10px; }
-        .popup-btn { width: 100%; border: none; color: white; padding: 8px; margin-top: 5px; cursor: pointer; border-radius: 4px; }
+        .speed-val { font-size: 40px; color: #2ecc71; font-weight: bold; display: block; }
+        
+        /* Rota paneli çok yer kaplamasın diye gizliyoruz, sadece haritada çizgi kalsın */
+        .leaflet-routing-container { display: none; }
     </style>
 </head>
 <body>
 
 <div class="status-box">
-    <span id="db-status">Buluta Bağlanılıyor...</span>
+    <span id="db-status">Bağlanıyor...</span>
     <button id="mute-toggle" class="mute-btn" onclick="toggleMute()">🔊 Ses Açık</button>
 </div>
 
 <div id="assistant-panel">
-    <div id="light-info" style="font-size: 14px; opacity: 0.8; margin-bottom: 5px;">Hesaplanıyor...</div>
+    <div id="light-info" style="font-size: 13px; opacity: 0.8; margin-bottom: 5px;">Hesaplanıyor...</div>
     <div id="speed-suggestion">Önerilen Hız:<br><span class="speed-val">--</span> <small>km/s</small></div>
 </div>
 
 <div id="map"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
+
 <script>
-    // --- GÜVENLİK ---
+    // --- GÜVENLİK VE AYARLAR ---
     const ADMIN_PASSWORD = "bursa16"; 
     const urlParams = new URLSearchParams(window.location.search);
     const isAdmin = urlParams.get('admin') === ADMIN_PASSWORD;
 
-    // --- FIREBASE CONFIG (Kendi bilgilerini buraya yapıştır) ---
+    // --- FIREBASE (Kendi bilgilerini buraya yapıştır) ---
     const firebaseConfig = {
         apiKey: "AIzaSyAgfkGI82dqs8fa_sqQjWl1ZcIf9AJDEes",
         authDomain: "trafik-2291d.firebaseapp.com",
@@ -70,50 +78,60 @@
 
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
-    const statusDiv = document.getElementById('db-status');
-    const assistantPanel = document.getElementById('assistant-panel');
 
-    var map = L.map('map').setView([40.1885, 29.0610], 14);
+    // Harita Başlangıcı (Zoom butonları kapalı)
+    var map = L.map('map', { zoomControl: false }).setView([40.1885, 29.0610], 14);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
     let userMarker = L.circleMarker([0,0], {radius: 10, color: 'white', weight: 3, fillColor: '#3498db', fillOpacity: 1}).addTo(map);
     let allLights = {};
     let isMuted = false;
     let lastSpeechTime = 0;
+    let routingControl = null;
 
-    // Veritabanı Bağlantısı
-    db.ref('lights').on('value', (snapshot) => {
-        statusDiv.innerHTML = isAdmin ? '🟢 Admin <span class="admin-badge">YÖNETİCİ</span>' : '🟢 İzleyici';
-        map.eachLayer((layer) => { if (layer instanceof L.CircleMarker && layer !== userMarker) map.removeLayer(layer); });
-        allLights = snapshot.val() || {};
-        for (let id in allLights) { renderLight(id, allLights[id]); }
-    });
-
-    // SES AÇ/KAPAT FONKSİYONU
-    function toggleMute() {
-        isMuted = !isMuted;
-        const btn = document.getElementById('mute-toggle');
-        if (isMuted) {
-            btn.innerText = "🔇 Ses Kapalı";
-            btn.classList.add('active');
-            window.speechSynthesis.cancel();
-        } else {
-            btn.innerText = "🔊 Ses Açık";
-            btn.classList.remove('active');
-        }
+    // 1. Rota Çizme Fonksiyonu
+    function createRoute(destination) {
+        if (routingControl) map.removeControl(routingControl);
+        routingControl = L.Routing.control({
+            waypoints: [L.latLng(userMarker.getLatLng()), L.latLng(destination)],
+            lineOptions: { styles: [{ color: '#3498db', weight: 6, opacity: 0.7 }] },
+            createMarker: function() { return null; },
+            addWaypoints: false
+        }).addTo(map);
+        speak("Rota oluşturuldu.");
     }
 
-    // KONUŞMA FONKSİYONU
+    // 2. Basılı Tutunca Rota Oluştur (Mobil için contextmenu kullanılır)
+    map.on('contextmenu', function(e) {
+        if (!isAdmin && confirm("Bu noktaya rota çizilsin mi?")) {
+            createRoute(e.latlng);
+        }
+    });
+
+    // Ses ve Veritabanı İşlemleri
+    function toggleMute() {
+        isMuted = !isMuted;
+        document.getElementById('mute-toggle').innerText = isMuted ? "🔇 Ses Kapalı" : "🔊 Ses Açık";
+        document.getElementById('mute-toggle').classList.toggle('active', isMuted);
+    }
+
     function speak(text) {
         if (!isMuted) {
-            window.speechSynthesis.cancel(); 
+            window.speechSynthesis.cancel();
             const utterance = new SpeechSynthesisUtterance(text);
             utterance.lang = 'tr-TR';
             window.speechSynthesis.speak(utterance);
         }
     }
 
-    // KONUM TAKİBİ
+    db.ref('lights').on('value', (snapshot) => {
+        document.getElementById('db-status').innerText = isAdmin ? "🟢 Admin Modu" : "🟢 İzleyici";
+        map.eachLayer((layer) => { if (layer instanceof L.CircleMarker && layer !== userMarker) map.removeLayer(layer); });
+        allLights = snapshot.val() || {};
+        for (let id in allLights) { renderLight(id, allLights[id]); }
+    });
+
+    // Konum ve Takip
     map.locate({watch: true, enableHighAccuracy: true});
     map.on('locationfound', function(e) {
         userMarker.setLatLng(e.latlng);
@@ -135,10 +153,8 @@
             }
         }
         if (nearest) {
-            assistantPanel.style.display = "block";
+            document.getElementById('assistant-panel').style.display = "block";
             calculateGreenWave(nearest);
-        } else {
-            assistantPanel.style.display = "none";
         }
     }
 
@@ -147,7 +163,6 @@
         const elapsed = Math.floor((now - light.startTime) / 1000);
         const totalCycle = light.red + light.green;
         const cyclePos = elapsed % totalCycle;
-
         let timeToGreen = (cyclePos < light.red) ? (light.red - cyclePos) : ((totalCycle - cyclePos) + light.red);
         let suggestedSpeed = (light.dist / timeToGreen) * 3.6;
         
@@ -157,33 +172,24 @@
         if (suggestedSpeed > 15 && suggestedSpeed < 85) {
             let roundedSpeed = Math.round(suggestedSpeed);
             speedEl.innerText = roundedSpeed;
-            speedEl.style.color = "#2ecc71";
-            
-            // SESLİ UYARI
-            if (light.dist < 500 && (now - lastSpeechTime) > 15000) {
+            if (light.dist < 500 && (now - lastSpeechTime) > 20000) {
                 speak(`Hızınızı ${roundedSpeed} kilometreye ayarlayın.`);
                 lastSpeechTime = now;
             }
         } else {
             speedEl.innerText = "--";
-            speedEl.style.color = "#f1c40f";
         }
     }
 
     function renderLight(id, light) {
-        var marker = L.circleMarker([light.lat, light.lng], {radius: 12, color: 'red', fillOpacity: 0.9}).addTo(map);
+        var marker = L.circleMarker([light.lat, light.lng], {radius: 12, color: 'red', fillOpacity: 0.8}).addTo(map);
         setInterval(() => {
             const now = Date.now();
             const elapsed = Math.floor((now - light.startTime) / 1000);
-            const totalCycle = light.red + light.green;
-            const cyclePos = elapsed % totalCycle;
-            if (cyclePos < light.red) {
-                marker.setStyle({color: 'red', fillColor: 'red'});
-                marker.setTooltipContent(`KIRMIZI: ${light.red - cyclePos}s`);
-            } else {
-                marker.setStyle({color: 'green', fillColor: 'green'});
-                marker.setTooltipContent(`YEŞİL: ${totalCycle - cyclePos}s`);
-            }
+            const cyclePos = elapsed % (light.red + light.green);
+            const isRed = cyclePos < light.red;
+            marker.setStyle({color: isRed ? 'red' : 'green', fillColor: isRed ? 'red' : 'green'});
+            marker.setTooltipContent(isRed ? `KIRMIZI: ${light.red - cyclePos}s` : `YEŞİL: ${(light.red + light.green) - cyclePos}s`);
         }, 1000);
         marker.bindTooltip("...", {permanent: true, direction: 'top', offset: [0, -10]});
         if (isAdmin) {
@@ -193,14 +199,13 @@
 
     map.on('click', function(e) {
         if (!isAdmin) return;
-        var red = prompt("Kırmızı (sn):", "30");
-        var green = prompt("Yeşil (sn):", "20");
-        if (red && green) db.ref('lights').push({lat: e.latlng.lat, lng: e.latlng.lng, red: parseInt(red), green: parseInt(green), startTime: Date.now()});
+        var r = prompt("Kırmızı (sn):", "30"), g = prompt("Yeşil (sn):", "20");
+        if (r && g) db.ref('lights').push({lat: e.latlng.lat, lng: e.latlng.lng, red: parseInt(r), green: parseInt(g), startTime: Date.now()});
     });
 
     window.resetLight = (id) => { db.ref('lights/' + id).update({ startTime: Date.now() }); map.closePopup(); };
     window.deleteLight = (id) => { if(confirm("Silinsin mi?")) db.ref('lights/' + id).remove(); };
+
 </script>
 </body>
 </html>
-
