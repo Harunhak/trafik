@@ -3,43 +3,52 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>Bursa Yeşil Dalga - Navigasyon</title>
+    <title>Bursa Yeşil Dalga - Profesyonel Navigasyon</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
-    
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
-    
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
     
     <style>
-        body { margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; }
-        #map { height: 100vh; width: 100vw; }
+        body { margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
+        #map { height: 100vh; width: 100vw; z-index: 1; }
         
+        /* Sol Üst Durum Paneli */
         .status-box {
             position: absolute; top: 10px; left: 10px; z-index: 1000;
-            background: white; padding: 10px 15px; border-radius: 12px;
+            background: white; padding: 8px 12px; border-radius: 12px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.2); font-weight: bold; font-size: 13px;
             display: flex; align-items: center;
         }
 
         .mute-btn {
-            cursor: pointer; margin-left: 12px; padding: 5px 10px;
-            border-radius: 8px; border: 1px solid #ddd; background: #fdfdfd;
-            font-size: 11px; font-weight: bold;
+            cursor: pointer; margin-left: 10px; padding: 5px 10px;
+            border-radius: 8px; border: 1px solid #ddd; background: #fdfdfd; font-size: 11px;
         }
         .mute-btn.active { background: #ff7675; color: white; border-color: #d63031; }
+
+        /* Sağ Üst Takip Butonu */
+        .recenter-btn {
+            position: absolute; top: 10px; right: 10px; z-index: 1000;
+            background: white; border: 2px solid #3498db; color: #3498db;
+            padding: 0; border-radius: 50%; width: 50px; height: 50px;
+            font-size: 22px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            display: flex; align-items: center; justify-content: center; transition: 0.3s;
+        }
+        .recenter-btn.tracking { background: #3498db; color: white; }
         
+        /* Alt Hız Paneli */
         #assistant-panel {
             position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
             z-index: 1000; background: rgba(0, 0, 0, 0.85); color: white;
-            padding: 20px; border-radius: 20px; text-align: center;
-            width: 85%; max-width: 350px; display: none; border: 2px solid #3498db;
+            padding: 15px 25px; border-radius: 20px; text-align: center;
+            width: 80%; max-width: 300px; display: none; border: 2px solid #3498db;
         }
-        .speed-val { font-size: 40px; color: #2ecc71; font-weight: bold; display: block; }
-        .leaflet-routing-container { display: none; }
+        .speed-val { font-size: 45px; color: #2ecc71; font-weight: bold; display: block; line-height: 1.1; }
+        .leaflet-routing-container { display: none; } /* Rota metinlerini gizle */
     </style>
 </head>
 <body>
@@ -49,23 +58,21 @@
     <button id="mute-toggle" class="mute-btn" onclick="toggleMute()">🔊 Ses Açık</button>
 </div>
 
+<button id="recenter-btn" class="recenter-btn tracking" onclick="toggleTracking()">📍</button>
+
 <div id="assistant-panel">
-    <div id="light-info" style="font-size: 13px; opacity: 0.8; margin-bottom: 5px;">Hesaplanıyor...</div>
+    <div id="light-info" style="font-size: 12px; opacity: 0.8; margin-bottom: 5px;">Hesaplanıyor...</div>
     <div id="speed-suggestion">Önerilen Hız:<br><span class="speed-val">--</span> <small>km/s</small></div>
 </div>
 
 <div id="map"></div>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
-
 <script>
-    // --- GÜVENLİK VE AYARLAR ---
+    // --- KONFİGÜRASYON ---
     const ADMIN_PASSWORD = "bursa16"; 
     const urlParams = new URLSearchParams(window.location.search);
     const isAdmin = urlParams.get('admin') === ADMIN_PASSWORD;
 
-    // --- FIREBASE (Kendi bilgilerini buraya yapıştır) ---
     const firebaseConfig = {
         apiKey: "AIzaSyAgfkGI82dqs8fa_sqQjWl1ZcIf9AJDEes",
         authDomain: "trafik-2291d.firebaseapp.com",
@@ -80,40 +87,65 @@
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
 
-    // Harita Başlangıcı (Zoom butonları kapalı)
+    // Harita Kurulumu
     var map = L.map('map', { zoomControl: false }).setView([40.1885, 29.0610], 14);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
     let userMarker = L.circleMarker([0,0], {radius: 10, color: 'white', weight: 3, fillColor: '#3498db', fillOpacity: 1}).addTo(map);
     let allLights = {};
     let isMuted = false;
+    let isTracking = true;
     let lastSpeechTime = 0;
     let routingControl = null;
 
-    // 1. Rota Çizme Fonksiyonu
-    function createRoute(destination) {
-        if (routingControl) map.removeControl(routingControl);
-        routingControl = L.Routing.control({
-            waypoints: [L.latLng(userMarker.getLatLng()), L.latLng(destination)],
-            lineOptions: { styles: [{ color: '#3498db', weight: 6, opacity: 0.7 }] },
-            createMarker: function() { return null; },
-            addWaypoints: false
-        }).addTo(map);
-        speak("Rota oluşturuldu.");
+    // --- TAKİP VE KONUM SİSTEMİ ---
+    function toggleTracking() {
+        isTracking = !isTracking;
+        const btn = document.getElementById('recenter-btn');
+        if (isTracking) {
+            btn.classList.add('tracking');
+            map.flyTo(userMarker.getLatLng(), map.getZoom(), {animate: true, duration: 1});
+        } else {
+            btn.classList.remove('tracking');
+        }
     }
 
-    // 2. Basılı Tutunca Rota Oluştur (Mobil için contextmenu kullanılır)
-    map.on('contextmenu', function(e) {
-        if (!isAdmin && confirm("Bu noktaya rota çizilsin mi?")) {
-            createRoute(e.latlng);
+    // Haritayı elle kaydırınca takibi bırak
+    map.on('movestart', function() {
+        if (isTracking) {
+            isTracking = false;
+            document.getElementById('recenter-btn').classList.remove('tracking');
         }
     });
 
-    // Ses ve Veritabanı İşlemleri
+    map.locate({watch: true, enableHighAccuracy: true});
+    map.on('locationfound', function(e) {
+        userMarker.setLatLng(e.latlng);
+        findNearestLight(e.latlng);
+        if (isTracking && !isAdmin) {
+            map.flyTo(e.latlng, map.getZoom(), {animate: true, duration: 1.5});
+        }
+    });
+
+    // --- ROTA SİSTEMİ ---
+    map.on('contextmenu', function(e) {
+        if (!isAdmin && confirm("Bu noktaya rota çizilsin mi?")) {
+            if (routingControl) map.removeControl(routingControl);
+            routingControl = L.Routing.control({
+                waypoints: [L.latLng(userMarker.getLatLng()), L.latLng(e.latlng)],
+                lineOptions: { styles: [{ color: '#3498db', weight: 6, opacity: 0.7 }] },
+                createMarker: () => null
+            }).addTo(map);
+            speak("Rota oluşturuldu.");
+        }
+    });
+
+    // --- SES VE VERİ SİSTEMİ ---
     function toggleMute() {
         isMuted = !isMuted;
         document.getElementById('mute-toggle').innerText = isMuted ? "🔇 Ses Kapalı" : "🔊 Ses Açık";
         document.getElementById('mute-toggle').classList.toggle('active', isMuted);
+        if (isMuted) window.speechSynthesis.cancel();
     }
 
     function speak(text) {
@@ -132,82 +164,61 @@
         for (let id in allLights) { renderLight(id, allLights[id]); }
     });
 
-    // Konum ve Takip
-    map.locate({watch: true, enableHighAccuracy: true});
-    map.on('locationfound', function(e) {
-        userMarker.setLatLng(e.latlng);
-        findNearestLight(e.latlng);
-        if (!isAdmin) {
-            map.flyTo(e.latlng, map.getZoom(), {animate: true, duration: 1.5});
-        }
-    });
-
     function findNearestLight(userPos) {
-        let nearest = null;
-        let minDistance = Infinity;
+        let nearest = null, minDistance = Infinity;
         for (let id in allLights) {
-            let light = allLights[id];
-            let dist = userPos.distanceTo([light.lat, light.lng]);
-            if (dist < minDistance && dist < 1000) {
-                minDistance = dist;
-                nearest = { id, ...light, dist };
-            }
+            let dist = userPos.distanceTo([allLights[id].lat, allLights[id].lng]);
+            if (dist < minDistance && dist < 1000) { minDistance = dist; nearest = { ...allLights[id], dist }; }
         }
         if (nearest) {
             document.getElementById('assistant-panel').style.display = "block";
             calculateGreenWave(nearest);
+        } else {
+            document.getElementById('assistant-panel').style.display = "none";
         }
     }
 
     function calculateGreenWave(light) {
         const now = Date.now();
         const elapsed = Math.floor((now - light.startTime) / 1000);
-        const totalCycle = light.red + light.green;
-        const cyclePos = elapsed % totalCycle;
-        let timeToGreen = (cyclePos < light.red) ? (light.red - cyclePos) : ((totalCycle - cyclePos) + light.red);
-        let suggestedSpeed = (light.dist / timeToGreen) * 3.6;
+        const total = light.red + light.green;
+        const pos = elapsed % total;
+        let tGreen = (pos < light.red) ? (light.red - pos) : ((total - pos) + light.red);
+        let speed = (light.dist / tGreen) * 3.6;
         
-        document.getElementById('light-info').innerText = `Işığa: ${Math.round(light.dist)}m | Kırmızı: ${timeToGreen}s`;
+        document.getElementById('light-info').innerText = `Işığa: ${Math.round(light.dist)}m | Kırmızı: ${tGreen}s`;
         const speedEl = document.querySelector('.speed-val');
 
-        if (suggestedSpeed > 15 && suggestedSpeed < 85) {
-            let roundedSpeed = Math.round(suggestedSpeed);
-            speedEl.innerText = roundedSpeed;
+        if (speed > 15 && speed < 85) {
+            let s = Math.round(speed);
+            speedEl.innerText = s;
             if (light.dist < 500 && (now - lastSpeechTime) > 20000) {
-                speak(`Hızınızı ${roundedSpeed} kilometreye ayarlayın.`);
+                speak(`Hızınızı ${s} kilometreye ayarlayın.`);
                 lastSpeechTime = now;
             }
-        } else {
-            speedEl.innerText = "--";
-        }
+        } else { speedEl.innerText = "--"; }
     }
 
     function renderLight(id, light) {
-        var marker = L.circleMarker([light.lat, light.lng], {radius: 12, color: 'red', fillOpacity: 0.8}).addTo(map);
+        var m = L.circleMarker([light.lat, light.lng], {radius: 12, color: 'red', fillOpacity: 0.8}).addTo(map);
         setInterval(() => {
-            const now = Date.now();
-            const elapsed = Math.floor((now - light.startTime) / 1000);
-            const cyclePos = elapsed % (light.red + light.green);
-            const isRed = cyclePos < light.red;
-            marker.setStyle({color: isRed ? 'red' : 'green', fillColor: isRed ? 'red' : 'green'});
-            marker.setTooltipContent(isRed ? `KIRMIZI: ${light.red - cyclePos}s` : `YEŞİL: ${(light.red + light.green) - cyclePos}s`);
+            const pos = Math.floor((Date.now() - light.startTime) / 1000) % (light.red + light.green);
+            const isRed = pos < light.red;
+            m.setStyle({color: isRed ? 'red' : 'green', fillColor: isRed ? 'red' : 'green'});
+            m.setTooltipContent(isRed ? `KIRMIZI: ${light.red - pos}s` : `YEŞİL: ${(light.red + light.green) - pos}s`);
         }, 1000);
-        marker.bindTooltip("...", {permanent: true, direction: 'top', offset: [0, -10]});
-        if (isAdmin) {
-            marker.bindPopup(`<button onclick="resetLight('${id}')" class="popup-btn" style="background:#f39c12;">Sıfırla</button><br><button onclick="deleteLight('${id}')" class="popup-btn" style="background:#e74c3c;">Sil</button>`);
-        }
+        m.bindTooltip("...", {permanent: true, direction: 'top', offset: [0, -10]});
+        if (isAdmin) m.bindPopup(`<button onclick="resetLight('${id}')">Sıfırla</button><button onclick="deleteLight('${id}')">Sil</button>`);
     }
 
-    map.on('click', function(e) {
+    map.on('click', (e) => {
         if (!isAdmin) return;
         var r = prompt("Kırmızı (sn):", "30"), g = prompt("Yeşil (sn):", "20");
         if (r && g) db.ref('lights').push({lat: e.latlng.lat, lng: e.latlng.lng, red: parseInt(r), green: parseInt(g), startTime: Date.now()});
     });
 
-    window.resetLight = (id) => { db.ref('lights/' + id).update({ startTime: Date.now() }); map.closePopup(); };
-    window.deleteLight = (id) => { if(confirm("Silinsin mi?")) db.ref('lights/' + id).remove(); };
-
+    window.resetLight = (id) => { db.ref('lights/' + id).update({ startTime: Date.now() }); };
+    window.deleteLight = (id) => { if(confirm("Sil?")) db.ref('lights/' + id).remove(); };
 </script>
 </body>
 </html>
-
