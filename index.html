@@ -38,54 +38,57 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
     // --- GÜVENLİK AYARI ---
-    const ADMIN_PASSWORD = "bursa16"; // Burayı dilediğin şifreyle değiştir!
+    const ADMIN_PASSWORD = "bursa16"; 
     const urlParams = new URLSearchParams(window.location.search);
     const isAdmin = urlParams.get('admin') === ADMIN_PASSWORD;
 
-    // --- FIREBASE CONFIG (Kendi bilgilerini buraya yapıştır) ---
+    // --- BURAYI KENDİ BİLGİLERİNLE DOLDUR ---
     const firebaseConfig = {
-        apiKey: "AIzaSy...",
-        authDomain: "projen.firebaseapp.com",
-        databaseURL: "https://projen-default-rtdb.firebaseio.com",
-        projectId: "projen",
-        storageBucket: "projen.appspot.com",
-        messagingSenderId: "...",
-        appId: "..."
+        apiKey: "AIzaSyAgfkGI82dqs8fa_sqQjWl1ZcIf9AJDEes",
+        authDomain: "trafik-2291d.firebaseapp.com",
+        databaseURL: "https://trafik-2291d-default-rtdb.europe-west1.firebasedatabase.app",
+        projectId: "trafik-2291d",
+        storageBucket: "trafik-2291d.firebasestorage.app",
+        messagingSenderId: "119089745586",
+        appId: "1:119089745586:web:ef1e7280435a4aa918c3ab",
+        measurementId: "G-6TF54HZHVS"
     };
+    // ------------------------------------------
 
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
     const statusDiv = document.getElementById('db-status');
     const assistantPanel = document.getElementById('assistant-panel');
 
-    // Haritayı Başlat
     var map = L.map('map').setView([40.1885, 29.0610], 14);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
     let userMarker = L.circleMarker([0,0], {radius: 8, color: '#3498db', fillColor: '#3498db', fillOpacity: 1}).addTo(map);
     let allLights = {};
 
-    // Admin durumuna göre arayüzü güncelle
     if (isAdmin) {
         statusDiv.innerHTML = '🟢 Admin Modu <span class="admin-badge">YÖNETİCİ</span>';
     } else {
         statusDiv.innerHTML = '🟢 İzleyici Modu';
     }
 
-    // Verileri Çek
+    // Verileri Çek ve Haritaya Ekle
     db.ref('lights').on('value', (snapshot) => {
+        statusDiv.style.color = "green";
+        // Markerları temizle
         map.eachLayer((layer) => { if (layer instanceof L.CircleMarker && layer !== userMarker) map.removeLayer(layer); });
+        
         allLights = snapshot.val() || {};
-        for (let id in allLights) { renderLight(id, allLights[id]); }
+        for (let id in allLights) {
+            renderLight(id, allLights[id]);
+        }
     });
 
-    // SADECE ADMIN IŞIK EKLEYEBİLİR
+    // Sadece Admin Işık Ekleyebilir
     map.on('click', function(e) {
-        if (!isAdmin) return; // Admin değilse işlem yapma
-
+        if (!isAdmin) return;
         var red = prompt("Kırmızı ışık süresi (sn):", "30");
         var green = prompt("Yeşil ışık süresi (sn):", "20");
-        
         if (red && green) {
             db.ref('lights').push({
                 lat: e.latlng.lat, lng: e.latlng.lng,
@@ -98,8 +101,7 @@
     function renderLight(id, light) {
         var marker = L.circleMarker([light.lat, light.lng], {radius: 12, color: 'red', fillOpacity: 0.9}).addTo(map);
         
-        // Zamanlayıcı
-        setInterval(() => {
+        const timerInterval = setInterval(() => {
             const now = Date.now();
             const elapsed = Math.floor((now - light.startTime) / 1000);
             const totalCycle = light.red + light.green;
@@ -116,7 +118,6 @@
 
         marker.bindTooltip("...", {permanent: true, direction: 'top', offset: [0, -10]});
 
-        // SADECE ADMIN POPUP (SİL/SIFIRLA) GÖREBİLİR
         if (isAdmin) {
             const popupHtml = `
                 <div style="min-width:120px; text-align:center;">
@@ -126,21 +127,59 @@
                 </div>`;
             marker.bindPopup(popupHtml);
         }
+        
+        marker.on('remove', () => clearInterval(timerInterval));
     }
 
-    // Navigasyon & Konum Takibi
+    // Konum ve Yeşil Dalga Hesaplama
     map.locate({watch: true, enableHighAccuracy: true});
     map.on('locationfound', function(e) {
         userMarker.setLatLng(e.latlng);
-        // En yakın ışığı bul ve hesapla (Mevcut fonksiyonun...)
         findNearestLight(e.latlng);
     });
 
-    window.resetLight = (id) => db.ref('lights/' + id).update({ startTime: Date.now() });
-    window.deleteLight = (id) => confirm("Silinsin mi?") && db.ref('lights/' + id).remove();
+    function findNearestLight(userPos) {
+        let nearest = null;
+        let minDistance = Infinity;
+        for (let id in allLights) {
+            let light = allLights[id];
+            let dist = userPos.distanceTo([light.lat, light.lng]);
+            if (dist < minDistance && dist < 1000) {
+                minDistance = dist;
+                nearest = { id, ...light, dist };
+            }
+        }
+        if (nearest) {
+            assistantPanel.style.display = "block";
+            calculateGreenWave(nearest);
+        } else {
+            assistantPanel.style.display = "none";
+        }
+    }
 
-    // Hız hesaplama fonksiyonu (Önceki kodun aynısı burada devam edecek...)
-    function findNearestLight(userPos) { /* ... aynı kod ... */ }
+    function calculateGreenWave(light) {
+        const now = Date.now();
+        const elapsed = Math.floor((now - light.startTime) / 1000);
+        const totalCycle = light.red + light.green;
+        const cyclePos = elapsed % totalCycle;
+        let timeToGreen = (cyclePos < light.red) ? (light.red - cyclePos) : ((totalCycle - cyclePos) + light.red);
+        let suggestedSpeed = (light.dist / timeToGreen) * 3.6;
+        
+        document.getElementById('light-info').innerText = `Işığa: ${Math.round(light.dist)}m | Kırmızı: ${timeToGreen}s`;
+        const speedEl = document.querySelector('.speed-val');
+        if (suggestedSpeed > 10 && suggestedSpeed < 80) {
+            speedEl.innerText = Math.round(suggestedSpeed);
+            speedEl.style.color = "#2ecc71";
+            document.getElementById('speed-suggestion').style.display = "block";
+        } else {
+            speedEl.innerText = "--";
+            document.getElementById('speed-suggestion').innerText = suggestedSpeed > 80 ? "Yetişemezsin!" : "Çok Yavaşla!";
+        }
+    }
+
+    window.resetLight = (id) => { db.ref('lights/' + id).update({ startTime: Date.now() }); map.closePopup(); };
+    window.deleteLight = (id) => { if(confirm("Silinsin mi?")) db.ref('lights/' + id).remove(); };
+
 </script>
 </body>
 </html>
