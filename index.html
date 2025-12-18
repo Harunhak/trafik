@@ -2,11 +2,14 @@
 <html lang="tr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Bursa Yeşil Dalga - Navigasyon</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
+    
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
     
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
@@ -36,8 +39,6 @@
             width: 85%; max-width: 350px; display: none; border: 2px solid #3498db;
         }
         .speed-val { font-size: 40px; color: #2ecc71; font-weight: bold; display: block; }
-        
-        /* Rota paneli çok yer kaplamasın diye gizliyoruz, sadece haritada çizgi kalsın */
         .leaflet-routing-container { display: none; }
     </style>
 </head>
@@ -209,3 +210,4 @@
 </script>
 </body>
 </html>
+
