@@ -87,9 +87,7 @@
     map.on('locationfound', function(e) {
         userMarker.setLatLng(e.latlng); // Mavi noktayı taşı
         findNearestLight(e.latlng);     // Konum değiştikçe en yakın ışığı bul
-        
-        // Eğer haritadan uzaklaşırsan seni merkeze alır (opsiyonel)
-        // map.panTo(e.latlng); 
+        map.panTo(e.latlng); 
     });
 
     map.on('locationerror', function(e) {
@@ -184,3 +182,4 @@
 </script>
 </body>
 </html>
+
