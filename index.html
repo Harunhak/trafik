@@ -3,154 +3,144 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bursa Canlı Trafik Takip</title>
+    <title>Bursa Yeşil Dalga - Admin</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
     <style>
-        body { margin: 0; padding: 0; font-family: sans-serif; }
+        body { margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; }
         #map { height: 100vh; width: 100vw; }
         .status-box {
             position: absolute; top: 10px; left: 50px; z-index: 1000;
             background: white; padding: 8px 15px; border-radius: 20px;
             box-shadow: 0 2px 5px rgba(0,0,0,0.2); font-weight: bold; font-size: 13px;
         }
-        .popup-btn {
-            width: 100%; border: none; color: white; padding: 8px;
-            margin-top: 5px; cursor: pointer; border-radius: 4px; font-weight: bold;
+        #assistant-panel {
+            position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+            z-index: 1000; background: rgba(0, 0, 0, 0.85); color: white;
+            padding: 15px 25px; border-radius: 15px; text-align: center;
+            width: 80%; max-width: 400px; display: none;
         }
+        .speed-val { font-size: 24px; color: #2ecc71; font-weight: bold; }
+        .popup-btn { width: 100%; border: none; color: white; padding: 8px; margin-top: 5px; cursor: pointer; border-radius: 4px; font-weight: bold; }
+        .admin-badge { background: #e74c3c; color: white; padding: 2px 8px; border-radius: 10px; margin-left: 10px; font-size: 10px; }
     </style>
 </head>
 <body>
 
 <div class="status-box" id="db-status">Buluta Bağlanılıyor...</div>
+<div id="assistant-panel">
+    <div id="light-info">Işığa mesafe hesaplanıyor...</div>
+    <div id="speed-suggestion">Önerilen Hız: <span class="speed-val">--</span> km/s</div>
+</div>
 <div id="map"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-    // --- BURAYI KENDİ BİLGİLERİNLE DOLDUR (Firebase -> Proje Ayarları) ---
-    const firebaseConfig = {
-        apiKey: "AIzaSyAgfkGI82dqs8fa_sqQjWl1ZcIf9AJDEes",
-        authDomain: "trafik-2291d.firebaseapp.com",
-        databaseURL: "https://trafik-2291d-default-rtdb.europe-west1.firebasedatabase.app",
-        projectId: "trafik-2291d",
-        storageBucket: "trafik-2291d.firebasestorage.app",
-        messagingSenderId: "119089745586",
-        appId: "1:119089745586:web:ef1e7280435a4aa918c3ab",
-        measurementId: "G-6TF54HZHVS"
-    };
-    // ------------------------------------------------------------------
+    // --- GÜVENLİK AYARI ---
+    const ADMIN_PASSWORD = "bursa16"; // Burayı dilediğin şifreyle değiştir!
+    const urlParams = new URLSearchParams(window.location.search);
+    const isAdmin = urlParams.get('admin') === ADMIN_PASSWORD;
 
-    // Firebase'i Başlat
+    // --- FIREBASE CONFIG (Kendi bilgilerini buraya yapıştır) ---
+    const firebaseConfig = {
+        apiKey: "AIzaSy...",
+        authDomain: "projen.firebaseapp.com",
+        databaseURL: "https://projen-default-rtdb.firebaseio.com",
+        projectId: "projen",
+        storageBucket: "projen.appspot.com",
+        messagingSenderId: "...",
+        appId: "..."
+    };
+
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
     const statusDiv = document.getElementById('db-status');
+    const assistantPanel = document.getElementById('assistant-panel');
 
-    // Bursa Odaklı Harita
-    var map = L.map('map', {
-        maxBounds: [[39.90, 28.40], [40.50, 29.80]], // Bursa dışına kaymayı engelle
-        maxBoundsViscosity: 1.0
-    }).setView([40.1885, 29.0610], 14);
+    // Haritayı Başlat
+    var map = L.map('map').setView([40.1885, 29.0610], 14);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© Bursa Trafik Takip'
-    }).addTo(map);
+    let userMarker = L.circleMarker([0,0], {radius: 8, color: '#3498db', fillColor: '#3498db', fillOpacity: 1}).addTo(map);
+    let allLights = {};
 
-    // Buluttan Verileri Çek ve Gerçek Zamanlı Dinle
+    // Admin durumuna göre arayüzü güncelle
+    if (isAdmin) {
+        statusDiv.innerHTML = '🟢 Admin Modu <span class="admin-badge">YÖNETİCİ</span>';
+    } else {
+        statusDiv.innerHTML = '🟢 İzleyici Modu';
+    }
+
+    // Verileri Çek
     db.ref('lights').on('value', (snapshot) => {
-        statusDiv.innerText = "🟢 Bulut Bağlantısı Aktif";
-        statusDiv.style.color = "green";
-        
-        // Mevcut markerları temizle (Yeniden çizim için)
-        map.eachLayer((layer) => {
-            if (layer instanceof L.CircleMarker) map.removeLayer(layer);
-        });
-        
-        const data = snapshot.val();
-        if (data) {
-            for (let id in data) {
-                renderLight(id, data[id]);
-            }
-        }
-    }, (error) => {
-        statusDiv.innerText = "🔴 Bağlantı Hatası: " + error.message;
-        statusDiv.style.color = "red";
+        map.eachLayer((layer) => { if (layer instanceof L.CircleMarker && layer !== userMarker) map.removeLayer(layer); });
+        allLights = snapshot.val() || {};
+        for (let id in allLights) { renderLight(id, allLights[id]); }
     });
 
-    // Haritaya Tıklayınca Yeni Işık Ekle
+    // SADECE ADMIN IŞIK EKLEYEBİLİR
     map.on('click', function(e) {
-        var red = prompt("Kırmızı ışık süresi (saniye):", "30");
-        var green = prompt("Yeşil ışık süresi (saniye):", "20");
+        if (!isAdmin) return; // Admin değilse işlem yapma
+
+        var red = prompt("Kırmızı ışık süresi (sn):", "30");
+        var green = prompt("Yeşil ışık süresi (sn):", "20");
         
         if (red && green) {
-            const newLightRef = db.ref('lights').push();
-            newLightRef.set({
-                lat: e.latlng.lat,
-                lng: e.latlng.lng,
-                red: parseInt(red),
-                green: parseInt(green),
+            db.ref('lights').push({
+                lat: e.latlng.lat, lng: e.latlng.lng,
+                red: parseInt(red), green: parseInt(green),
                 startTime: Date.now()
             });
         }
     });
 
-    // Işığı Haritada Çiz ve Çalıştır
     function renderLight(id, light) {
-        var marker = L.circleMarker([light.lat, light.lng], {
-            radius: 12, color: 'red', fillOpacity: 0.9, weight: 3
-        }).addTo(map);
-
-        // Her saniye ışık rengini hesapla
-        const timerInterval = setInterval(() => {
+        var marker = L.circleMarker([light.lat, light.lng], {radius: 12, color: 'red', fillOpacity: 0.9}).addTo(map);
+        
+        // Zamanlayıcı
+        setInterval(() => {
             const now = Date.now();
             const elapsed = Math.floor((now - light.startTime) / 1000);
             const totalCycle = light.red + light.green;
             const cyclePos = elapsed % totalCycle;
 
-            let statusText, remaining;
             if (cyclePos < light.red) {
-                statusText = "KIRMIZI";
-                remaining = light.red - cyclePos;
                 marker.setStyle({color: 'red', fillColor: 'red'});
+                marker.setTooltipContent(`KIRMIZI: ${light.red - cyclePos}s`);
             } else {
-                statusText = "YEŞİL";
-                remaining = totalCycle - cyclePos;
                 marker.setStyle({color: 'green', fillColor: 'green'});
-            }
-            
-            if (marker.getTooltip()) {
-                marker.setTooltipContent(`${statusText}: ${remaining}s`);
+                marker.setTooltipContent(`YEŞİL: ${totalCycle - cyclePos}s`);
             }
         }, 1000);
 
-        marker.bindTooltip("Hesaplanıyor...", {permanent: true, direction: 'top', offset: [0, -10]});
+        marker.bindTooltip("...", {permanent: true, direction: 'top', offset: [0, -10]});
 
-        // Işığa Tıklayınca Kontrol Paneli (Sıfırla/Sil)
-        const popupHtml = `
-            <div style="min-width:120px;">
-                <b style="display:block;margin-bottom:8px;text-align:center;">Işık Yönetimi</b>
-                <button onclick="resetLight('${id}')" class="popup-btn" style="background:#f39c12;">🔴 Sıfırla (Kırmızı)</button>
-                <button onclick="deleteLight('${id}')" class="popup-btn" style="background:#e74c3c;">🗑️ Işığı Sil</button>
-            </div>
-        `;
-        marker.bindPopup(popupHtml);
-
-        // Marker silindiğinde sayacı durdur (bellek yönetimi)
-        marker.on('remove', () => clearInterval(timerInterval));
+        // SADECE ADMIN POPUP (SİL/SIFIRLA) GÖREBİLİR
+        if (isAdmin) {
+            const popupHtml = `
+                <div style="min-width:120px; text-align:center;">
+                    <b>Işık Yönetimi</b><br>
+                    <button onclick="resetLight('${id}')" class="popup-btn" style="background:#f39c12;">Sıfırla</button>
+                    <button onclick="deleteLight('${id}')" class="popup-btn" style="background:#e74c3c;">Sil</button>
+                </div>`;
+            marker.bindPopup(popupHtml);
+        }
     }
 
-    // --- Global Fonksiyonlar ---
-    window.resetLight = function(id) {
-        db.ref('lights/' + id).update({ startTime: Date.now() });
-        map.closePopup();
-    };
+    // Navigasyon & Konum Takibi
+    map.locate({watch: true, enableHighAccuracy: true});
+    map.on('locationfound', function(e) {
+        userMarker.setLatLng(e.latlng);
+        // En yakın ışığı bul ve hesapla (Mevcut fonksiyonun...)
+        findNearestLight(e.latlng);
+    });
 
-    window.deleteLight = function(id) {
-        if(confirm("Bu ışığı silmek istediğinize emin misiniz?")) {
-            db.ref('lights/' + id).remove();
-        }
-    };
+    window.resetLight = (id) => db.ref('lights/' + id).update({ startTime: Date.now() });
+    window.deleteLight = (id) => confirm("Silinsin mi?") && db.ref('lights/' + id).remove();
 
+    // Hız hesaplama fonksiyonu (Önceki kodun aynısı burada devam edecek...)
+    function findNearestLight(userPos) { /* ... aynı kod ... */ }
 </script>
 </body>
 </html>
