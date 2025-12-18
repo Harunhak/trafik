@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bursa Yeşil Dalga - Anlık Takip</title>
+    <title>Bursa Yeşil Dalga - Asistan</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
@@ -11,28 +11,42 @@
         body { margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; }
         #map { height: 100vh; width: 100vw; }
         .status-box {
-            position: absolute; top: 10px; left: 50px; z-index: 1000;
-            background: white; padding: 8px 15px; border-radius: 20px;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.2); font-weight: bold; font-size: 13px;
+            position: absolute; top: 10px; left: 10px; z-index: 1000;
+            background: white; padding: 10px 15px; border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2); font-weight: bold; font-size: 13px;
+            display: flex; align-items: center;
         }
+        /* SES KAPATMA BUTONU STİLİ */
+        .mute-btn {
+            cursor: pointer; margin-left: 12px; padding: 5px 10px;
+            border-radius: 8px; border: 1px solid #ddd; background: #fdfdfd;
+            font-size: 12px; font-weight: bold; transition: 0.3s;
+        }
+        .mute-btn.active { background: #ff7675; color: white; border-color: #d63031; }
+        
         #assistant-panel {
-            position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
-            z-index: 1000; background: rgba(0, 0, 0, 0.9); color: white;
-            padding: 15px 25px; border-radius: 15px; text-align: center;
-            width: 85%; max-width: 400px; display: none; border: 2px solid #3498db;
+            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+            z-index: 1000; background: rgba(0, 0, 0, 0.85); color: white;
+            padding: 20px; border-radius: 20px; text-align: center;
+            width: 85%; max-width: 350px; display: none; border: 2px solid #3498db;
         }
-        .speed-val { font-size: 32px; color: #2ecc71; font-weight: bold; display: block; }
-        .popup-btn { width: 100%; border: none; color: white; padding: 8px; margin-top: 5px; cursor: pointer; border-radius: 4px; font-weight: bold; }
+        .speed-val { font-size: 40px; color: #2ecc71; font-weight: bold; display: block; line-height: 1; }
         .admin-badge { background: #e74c3c; color: white; padding: 2px 8px; border-radius: 10px; margin-left: 10px; font-size: 10px; }
+        .popup-btn { width: 100%; border: none; color: white; padding: 8px; margin-top: 5px; cursor: pointer; border-radius: 4px; }
     </style>
 </head>
 <body>
 
-<div class="status-box" id="db-status">Buluta Bağlanılıyor...</div>
+<div class="status-box">
+    <span id="db-status">Buluta Bağlanılıyor...</span>
+    <button id="mute-toggle" class="mute-btn" onclick="toggleMute()">🔊 Ses Açık</button>
+</div>
+
 <div id="assistant-panel">
-    <div id="light-info" style="font-size: 14px; margin-bottom: 5px;">Hesaplanıyor...</div>
+    <div id="light-info" style="font-size: 14px; opacity: 0.8; margin-bottom: 5px;">Hesaplanıyor...</div>
     <div id="speed-suggestion">Önerilen Hız:<br><span class="speed-val">--</span> <small>km/s</small></div>
 </div>
+
 <div id="map"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -44,62 +58,68 @@
 
     // --- FIREBASE CONFIG (Kendi bilgilerini buraya yapıştır) ---
     const firebaseConfig = {
-        apiKey: "AIzaSyAgfkGI82dqs8fa_sqQjWl1ZcIf9AJDEes",
-        authDomain: "trafik-2291d.firebaseapp.com",
-        databaseURL: "https://trafik-2291d-default-rtdb.europe-west1.firebasedatabase.app",
-        projectId: "trafik-2291d",
-        storageBucket: "trafik-2291d.firebasestorage.app",
-        messagingSenderId: "119089745586",
-        appId: "1:119089745586:web:ef1e7280435a4aa918c3ab",
-        measurementId: "G-6TF54HZHVS"
+        apiKey: "AIzaSy...",
+        authDomain: "projen.firebaseapp.com",
+        databaseURL: "https://projen-default-rtdb.firebaseio.com",
+        projectId: "projen",
+        storageBucket: "projen.appspot.com",
+        messagingSenderId: "...",
+        appId: "..."
     };
-    
+
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
     const statusDiv = document.getElementById('db-status');
     const assistantPanel = document.getElementById('assistant-panel');
 
-    // Harita Başlangıcı
     var map = L.map('map').setView([40.1885, 29.0610], 14);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
-    // KULLANICI İÇİN MAVİ NOKTA (ANLIK TAKİP)
-    let userMarker = L.circleMarker([0,0], {
-        radius: 10, color: 'white', weight: 3, fillColor: '#3498db', fillOpacity: 1
-    }).addTo(map);
-
+    let userMarker = L.circleMarker([0,0], {radius: 10, color: 'white', weight: 3, fillColor: '#3498db', fillOpacity: 1}).addTo(map);
     let allLights = {};
+    let isMuted = false;
+    let lastSpeechTime = 0;
 
+    // Veritabanı Bağlantısı
     db.ref('lights').on('value', (snapshot) => {
-        statusDiv.innerHTML = isAdmin ? '🟢 Admin Modu <span class="admin-badge">YÖNETİCİ</span>' : '🟢 İzleyici Modu';
+        statusDiv.innerHTML = isAdmin ? '🟢 Admin <span class="admin-badge">YÖNETİCİ</span>' : '🟢 İzleyici';
         map.eachLayer((layer) => { if (layer instanceof L.CircleMarker && layer !== userMarker) map.removeLayer(layer); });
         allLights = snapshot.val() || {};
         for (let id in allLights) { renderLight(id, allLights[id]); }
     });
 
-    // --- ANLIK TAKİP MOTORU ---
-    map.locate({
-        watch: true,           // Sürekli izle
-        enableHighAccuracy: true, // GPS uydularını kullan (Yüksek hassasiyet)
-        setView: false         // Harita sürekli zıplamasın, biz manuel kaydırırız
-    });
-
-    map.on('locationfound', function(e) {
-        userMarker.setLatLng(e.latlng); // Mavi noktayı her zaman günceller
-        findNearestLight(e.latlng);     // Hız hesaplaması arka planda çalışır
-        
-        // Sadece admin DEĞİLSEN harita akıcı şekilde seni takip eder
-        if (!isAdmin) {
-            map.flyTo(e.latlng, map.getZoom(), {
-                animate: true,
-                duration: 1.5  // Kayma hızını buradan ayarlayabilirsin (saniye)
-            });
+    // SES AÇ/KAPAT FONKSİYONU
+    function toggleMute() {
+        isMuted = !isMuted;
+        const btn = document.getElementById('mute-toggle');
+        if (isMuted) {
+            btn.innerText = "🔇 Ses Kapalı";
+            btn.classList.add('active');
+            window.speechSynthesis.cancel();
+        } else {
+            btn.innerText = "🔊 Ses Açık";
+            btn.classList.remove('active');
         }
-    });
+    }
 
-    map.on('locationerror', function(e) {
-        statusDiv.innerHTML = "⚠️ GPS Erişimi Yok!";
-        statusDiv.style.color = "red";
+    // KONUŞMA FONKSİYONU
+    function speak(text) {
+        if (!isMuted) {
+            window.speechSynthesis.cancel(); 
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = 'tr-TR';
+            window.speechSynthesis.speak(utterance);
+        }
+    }
+
+    // KONUM TAKİBİ
+    map.locate({watch: true, enableHighAccuracy: true});
+    map.on('locationfound', function(e) {
+        userMarker.setLatLng(e.latlng);
+        findNearestLight(e.latlng);
+        if (!isAdmin) {
+            map.flyTo(e.latlng, map.getZoom(), {animate: true, duration: 1.5});
+        }
     });
 
     function findNearestLight(userPos) {
@@ -108,7 +128,7 @@
         for (let id in allLights) {
             let light = allLights[id];
             let dist = userPos.distanceTo([light.lat, light.lng]);
-            if (dist < minDistance && dist < 1200) { // 1.2 km içindeki en yakın ışık
+            if (dist < minDistance && dist < 1000) {
                 minDistance = dist;
                 nearest = { id, ...light, dist };
             }
@@ -127,35 +147,28 @@
         const totalCycle = light.red + light.green;
         const cyclePos = elapsed % totalCycle;
 
-        // Yeşil yanana kadar geçmesi gereken süre
-        let timeToGreen;
-        if (cyclePos < light.red) {
-            timeToGreen = light.red - cyclePos;
-        } else {
-            // Zaten yeşil yanıyor, bir sonraki yeşili mi hesaplayalım? 
-            // Şimdilik kırmızı bitimine odaklı:
-            timeToGreen = (totalCycle - cyclePos) + light.red;
-        }
-
-        let suggestedSpeed = (light.dist / timeToGreen) * 3.6; // km/s
+        let timeToGreen = (cyclePos < light.red) ? (light.red - cyclePos) : ((totalCycle - cyclePos) + light.red);
+        let suggestedSpeed = (light.dist / timeToGreen) * 3.6;
         
-        document.getElementById('light-info').innerText = `En Yakın Işık: ${Math.round(light.dist)}m`;
+        document.getElementById('light-info').innerText = `Işığa: ${Math.round(light.dist)}m | Kırmızı: ${timeToGreen}s`;
         const speedEl = document.querySelector('.speed-val');
-        
+
         if (suggestedSpeed > 15 && suggestedSpeed < 85) {
-            speedEl.innerText = Math.round(suggestedSpeed);
+            let roundedSpeed = Math.round(suggestedSpeed);
+            speedEl.innerText = roundedSpeed;
             speedEl.style.color = "#2ecc71";
-        } else if (suggestedSpeed >= 85) {
-            speedEl.innerText = "!!";
-            speedEl.style.color = "#e74c3c";
-            document.getElementById('light-info').innerText = "Yetişemezsin, çok hızlı!";
+            
+            // SESLİ UYARI
+            if (light.dist < 500 && (now - lastSpeechTime) > 15000) {
+                speak(`Hızınızı ${roundedSpeed} kilometreye ayarlayın.`);
+                lastSpeechTime = now;
+            }
         } else {
             speedEl.innerText = "--";
             speedEl.style.color = "#f1c40f";
         }
     }
 
-    // (Işık Ekleme ve Render Fonksiyonları...)
     function renderLight(id, light) {
         var marker = L.circleMarker([light.lat, light.lng], {radius: 12, color: 'red', fillOpacity: 0.9}).addTo(map);
         setInterval(() => {
@@ -189,5 +202,3 @@
 </script>
 </body>
 </html>
-
-
